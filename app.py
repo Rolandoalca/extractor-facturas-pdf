@@ -10,7 +10,7 @@ st.set_page_config(page_title="Extractor de Facturas PDF", page_icon="📄", lay
 st.title("📄 Extractor de Datos de Facturas PDF")
 st.markdown("---")
 
-# Función para extraer texto
+# Extraer texto
 def extract_text_from_pdf(pdf_file):
     try:
         with pdfplumber.open(pdf_file) as pdf:
@@ -22,7 +22,7 @@ def extract_text_from_pdf(pdf_file):
         st.error(f"Error al leer PDF: {str(e)}")
         return ""
 
-# Función para extraer número de factura
+# Extraer número de factura
 def extract_invoice_number(text):
     patterns = [
         r'(?:factura|invoice|bill)\s*(?:no|number|#)?\s*[:\-]?\s*([A-Z0-9\-]{3,20})',
@@ -40,7 +40,7 @@ def extract_invoice_number(text):
                 return number
     return "No encontrado"
 
-# Función para extraer monto total
+# Extraer monto total
 def extract_total_amount(text):
     patterns = [
         r'(?:t\s*o\s*t\s*a\s*l|total|total\s*general|grand\s*total|importe\s*total|monto\s*total|amount\s*due)\s*[:\-]?\s*(?:\$|¢|€|USD|CRC)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
@@ -51,26 +51,26 @@ def extract_total_amount(text):
         matches = re.findall(pattern, text, re.IGNORECASE | re.MULTILINE)
         for match in matches:
             try:
-                # Normalizar el número
                 normalized = match.replace('.', '').replace(',', '.')
                 if ',' in match and match.count(',') == 1 and match.rfind(',') > match.rfind('.') - 3:
                     normalized = match.replace('.', '').replace(',', '.')
                 else:
                     normalized = match.replace(',', '')
                 amount = float(normalized)
-                if 0 < amount < 100000000:
+                if 0 < amount < 1e8:
                     amounts.append(amount)
             except:
                 continue
     return max(amounts) if amounts else 0.0
 
-# Función para extraer impuestos
+# Extraer impuestos
 def extract_tax_amount(text):
     patterns = [
         r'(?:i\s*v\s*a|iva|impuesto|tax|vat)\s*[:\-]?\s*(?:\$|¢|€|USD|CRC)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
         r'(?:sales\s*tax|tax\s*amount|total\s*tax|impuestos?)\s*[:\-]?\s*(?:\$|¢|€|USD|CRC)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
         r'iva\s*\([\d.]+%\)\s*[:\-]?\s*(?:\$|¢|€)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
-        r'(?:^|\n|\s)(?:i\s*v\s*a|iva|impuesto|tax)\s*(?:\$|¢|€)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
+        # Nuevo patrón para columnas o líneas con I.V.A
+        r'i\.?\s*v\.?\s*a\.?\s*(?:\$|¢|€|USD|CRC)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
     ]
     taxes = []
     for pattern in patterns:
@@ -83,7 +83,7 @@ def extract_tax_amount(text):
                 else:
                     normalized = match.replace(',', '')
                 tax = float(normalized)
-                if 0 < tax < 100000:
+                if 0 < tax < 1e6:
                     taxes.append(tax)
             except:
                 continue
