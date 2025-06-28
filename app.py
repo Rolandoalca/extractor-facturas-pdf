@@ -34,41 +34,52 @@ def extract_text_from_pdf(pdf_file):
 def extract_invoice_number(text):
     """Extrae el número de factura del texto"""
     patterns = [
-        r'(?:factura|invoice|bill)\s*(?:no|number|#)?\s*:?\s*([A-Z0-9\-]+)',
-        r'(?:no\.?\s*factura|invoice\s*no\.?)\s*:?\s*([A-Z0-9\-]+)',
-        r'factura\s*([A-Z0-9\-]+)',
-        r'invoice\s*([A-Z0-9\-]+)',
-        r'#\s*([A-Z0-9\-]+)',
-        r'(\d{4,})',  # Números de 4 o más dígitos
+        # Patrones más específicos para números de factura
+        r'(?:factura|invoice|bill)\s*(?:no|number|#)?\s*[:\-]?\s*([A-Z0-9\-]{3,15})',
+        r'(?:no\.?\s*factura|invoice\s*no\.?)\s*[:\-]?\s*([A-Z0-9\-]{3,15})',
+        r'factura\s*([A-Z0-9\-]{3,15})',
+        r'invoice\s*([A-Z0-9\-]{3,15})',
+        r'(?:^|\n)#\s*([A-Z0-9\-]{3,15})',
+        r'(?:^|\n)(\d{4,10})(?=\s|$)',  # Números de 4-10 dígitos al inicio de línea
     ]
     
     for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
+        match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
         if match:
-            return match.group(1)
+            number = match.group(1)
+            # Filtrar números que son demasiado largos (probablemente códigos de barras)
+            if len(number) <= 15:
+                return number
     
     return "No encontrado"
 
 def extract_total_amount(text):
     """Extrae el monto total de la factura"""
     patterns = [
-        r'(?:total|amount|sum|suma)\s*:?\s*\$?\s*([\d,]+\.?\d*)',
-        r'total\s*general\s*:?\s*\$?\s*([\d,]+\.?\d*)',
-        r'grand\s*total\s*:?\s*\$?\s*([\d,]+\.?\d*)',
-        r'amount\s*due\s*:?\s*\$?\s*([\d,]+\.?\d*)',
-        r'\$\s*([\d,]+\.?\d*)',
-        r'([\d,]+\.?\d*)\s*(?:total|amount)',
+        # Patrones más específicos para totales
+        r'(?:total|amount|sum|suma)\s*[:\-]?\s*(?:\$|€|USD|EUR)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
+        r'total\s*general\s*[:\-]?\s*(?:\$|€)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
+        r'grand\s*total\s*[:\-]?\s*(?:\$|€)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
+        r'amount\s*due\s*[:\-]?\s*(?:\$|€)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
+        r'(?:^|\n|\s)total\s*(?:\$|€)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
     ]
     
     amounts = []
     for pattern in patterns:
-        matches = re.findall(pattern, text, re.IGNORECASE)
+        matches = re.findall(pattern, text, re.IGNORECASE | re.MULTILINE)
         for match in matches:
             try:
-                # Limpiar y convertir a float
-                clean_amount = match.replace(',', '')
+                # Manejar formato europeo vs americano
+                if ',' in match and match.count(',') == 1 and match.rfind(',') > match.rfind('.') - 3:
+                    # Formato europeo: 1.025,20
+                    clean_amount = match.replace('.', '').replace(',', '.')
+                else:
+                    # Formato americano: 1,025.20
+                    clean_amount = match.replace(',', '')
+                
                 amount = float(clean_amount)
-                if amount > 0:
+                # Filtrar montos razonables (no códigos largos)
+                if 0 < amount < 1000000:  # Montos razonables
                     amounts.append(amount)
             except ValueError:
                 continue
@@ -79,20 +90,30 @@ def extract_total_amount(text):
 def extract_tax_amount(text):
     """Extrae el monto de impuestos"""
     patterns = [
-        r'(?:tax|impuesto|iva|vat)\s*:?\s*\$?\s*([\d,]+\.?\d*)',
-        r'(?:sales\s*tax|tax\s*amount)\s*:?\s*\$?\s*([\d,]+\.?\d*)',
-        r'iva\s*\([\d.]+%\)\s*:?\s*\$?\s*([\d,]+\.?\d*)',
-        r'impuestos?\s*:?\s*\$?\s*([\d,]+\.?\d*)',
+        # Patrones más específicos para impuestos
+        r'(?:impuesto|iva|tax|vat)\s*[:\-]?\s*(?:\$|€|USD|EUR)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
+        r'(?:sales\s*tax|tax\s*amount|total\s*tax)\s*[:\-]?\s*(?:\$|€)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
+        r'iva\s*\([\d.]+%\)\s*[:\-]?\s*(?:\$|€)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
+        r'impuestos?\s*[:\-]?\s*(?:\$|€)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
+        r'(?:^|\n|\s)(?:impuesto|iva|tax)\s*(?:\$|€)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
     ]
     
     taxes = []
     for pattern in patterns:
-        matches = re.findall(pattern, text, re.IGNORECASE)
+        matches = re.findall(pattern, text, re.IGNORECASE | re.MULTILINE)
         for match in matches:
             try:
-                clean_tax = match.replace(',', '')
+                # Normalizar formato (convertir comas europeas a puntos)
+                clean_tax = match.replace('.', '').replace(',', '.')
+                # Si tenía formato europeo, intercambiar
+                if ',' in match and match.count(',') == 1 and match.rfind(',') > match.rfind('.') - 3:
+                    clean_tax = match.replace('.', '').replace(',', '.')
+                else:
+                    clean_tax = match.replace(',', '')
+                
                 tax = float(clean_tax)
-                if tax > 0:
+                # Filtrar valores que son demasiado grandes (probablemente códigos)
+                if 0 < tax < 100000:  # Impuestos razonables
                     taxes.append(tax)
             except ValueError:
                 continue
@@ -109,7 +130,8 @@ def process_pdf(pdf_file, filename):
             'Número de Factura': 'Error al leer PDF',
             'Monto Total': 0.0,
             'Impuestos': 0.0,
-            'Estado': 'Error'
+            'Estado': 'Error',
+            'Texto Extraído': 'Error al leer'
         }
     
     invoice_number = extract_invoice_number(text)
@@ -121,7 +143,8 @@ def process_pdf(pdf_file, filename):
         'Número de Factura': invoice_number,
         'Monto Total': total_amount,
         'Impuestos': tax_amount,
-        'Estado': 'Procesado'
+        'Estado': 'Procesado',
+        'Texto Extraído': text[:500] + "..." if len(text) > 500 else text  # Primeros 500 caracteres para debug
     }
 
 # Sidebar con información
@@ -215,8 +238,11 @@ if 'results_df' in st.session_state:
     df_display['Monto Total'] = df_display['Monto Total'].apply(lambda x: f"${x:,.2f}")
     df_display['Impuestos'] = df_display['Impuestos'].apply(lambda x: f"${x:,.2f}")
     
+    # Crear tabla sin la columna de texto extraído
+    df_table = df_display.drop('Texto Extraído', axis=1, errors='ignore')
+    
     st.dataframe(
-        df_display,
+        df_table,
         use_container_width=True,
         hide_index=True,
         column_config={
@@ -227,6 +253,12 @@ if 'results_df' in st.session_state:
             "Estado": st.column_config.TextColumn("Estado", width="small")
         }
     )
+    
+    # Opción para ver texto extraído (para debug)
+    if st.checkbox("🔍 Mostrar texto extraído (para depuración)"):
+        for i, row in df.iterrows():
+            with st.expander(f"📄 {row['Archivo']}"):
+                st.text_area("Texto extraído:", row.get('Texto Extraído', 'No disponible'), height=200)
     
     # Botón de descarga
     def convert_df_to_excel(df):
