@@ -63,14 +63,11 @@ def extract_total_amount(text):
                 continue
     return max(amounts) if amounts else 0.0
 
-# Extraer impuestos
-def extract_tax_amount(text):
+# Extraer impuestos desde texto plano
+def extract_tax_amount_from_text(text):
     patterns = [
         r'(?:i\s*v\s*a|iva|impuesto|tax|vat)\s*[:\-]?\s*(?:\$|¢|€|USD|CRC)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
         r'(?:sales\s*tax|tax\s*amount|total\s*tax|impuestos?)\s*[:\-]?\s*(?:\$|¢|€|USD|CRC)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
-        r'iva\s*\([\d.]+%\)\s*[:\-]?\s*(?:\$|¢|€)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
-        # Nuevo patrón para columnas o líneas con I.V.A
-        r'i\.?\s*v\.?\s*a\.?\s*(?:\$|¢|€|USD|CRC)?\s*([\d]{1,3}(?:[.,][\d]{3})*[.,][\d]{2})',
     ]
     taxes = []
     for pattern in patterns:
@@ -89,6 +86,36 @@ def extract_tax_amount(text):
                 continue
     return sum(taxes) if taxes else 0.0
 
+# Extraer impuestos desde tablas
+def extract_tax_amount_from_tables(pdf_file):
+    taxes = []
+    try:
+        with pdfplumber.open(pdf_file) as pdf:
+            for page in pdf.pages:
+                tables = page.extract_tables()
+                for table in tables:
+                    headers = table[0]
+                    iva_idx = None
+                    for i, h in enumerate(headers):
+                        if h and re.search(r'i\.?\s*v\.?\s*a\.?', h, re.IGNORECASE):
+                            iva_idx = i
+                            break
+                    if iva_idx is not None:
+                        for row in table[1:]:
+                            if iva_idx < len(row):
+                                val = row[iva_idx]
+                                if val:
+                                    val_clean = val.replace('.', '').replace(',', '.').replace(' ', '')
+                                    try:
+                                        tax_val = float(val_clean)
+                                        if 0 < tax_val < 1e6:
+                                            taxes.append(tax_val)
+                                    except:
+                                        continue
+        return sum(taxes) if taxes else 0.0
+    except:
+        return 0.0
+
 # Procesar PDF
 def process_pdf(pdf_file, filename):
     text = extract_text_from_pdf(pdf_file)
@@ -103,7 +130,11 @@ def process_pdf(pdf_file, filename):
         }
     invoice_number = extract_invoice_number(text)
     total_amount = extract_total_amount(text)
-    tax_amount = extract_tax_amount(text)
+    # Extraer impuestos primero desde tabla
+    tax_amount = extract_tax_amount_from_tables(pdf_file)
+    # Si no encuentra, intentar con texto plano
+    if tax_amount == 0.0:
+        tax_amount = extract_tax_amount_from_text(text)
     return {
         'Archivo': filename,
         'Número de Factura': invoice_number,
